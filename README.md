@@ -5,41 +5,7 @@ Diseño, cálculo, prototipado en placas perforadas FR4 (asistido por **KiCad**)
 El sistema integra aislamiento galvánico doble (óptico de alta velocidad para potencia y estándar industrial IEC 61131-2 a $24\text{ VDC}$ para mando desde un **PLC Siemens LOGO! 230RCEo**), interfaz local con pantalla **OLED I2C** y encoder incremental **`KY-040`**, y un servidor **SCADA Web Wi-Fi** embebido para control y telemetría móvil.
 
 ---
-## 1. Arquitectura Modular del Sistema
 
-El sistema se divide físicamente en dos tarjetas independientes sobre fibra de vidrio (FR4) para garantizar el aislamiento galvánico entre la lógica de control ($3.3\text{ VDC}$), las señales de mando industrial del PLC ($24\text{ VDC}$) y la etapa de conmutación de potencia ($24\text{ VDC} / 220\text{ VAC}$).
-
-### 1.1 Diagrama de Bloques Funcional
-
-```mermaid
-flowchart TD
-    subgraph CTRL ["1. Tarjeta de Control, HMI y Aislamiento PLC (Dominio 3.3 VDC - GND_ESP)"]
-        PLC["PLC Siemens LOGO! 230RCEo<br/>Salidas de Relé Q1, Q2, Q3 (24 VDC)"] -->|Señal 24 VDC| PC817["Aislamiento Óptico de Entrada<br/>3x Optoacopladores PC817 (U1-U3)"]
-        PC817 -->|GPIO 32, 33, 18| ESP32["Microcontrolador ESP32 (Dual-Core)<br/>Síntesis DDS 10 kHz + Periférico MCPWM"]
-        ENC["Encoder Incremental KY-040<br/>Consigna 0.0 a 60.0 Hz + Marcha/Paro"] -->|GPIO 4, 19, 15| ESP32
-        SCADA["Panel SCADA Web Móvil<br/>Wi-Fi SoftAP (192.168.4.1)"] <-->|HTTP / JSON| ESP32
-        ESP32 -->|Bus I2C 400 kHz<br/>GPIO 21, 22| OLED["Pantalla OLED 0.96 I2C<br/>Telemetría V/f y Estado PLC"]
-    end
-
-    subgraph POW ["2. Tarjeta de Potencia e Inversor SPWM (Dominio Aislado - COM_POT)"]
-        ESP32 -->|SPWM 10 kHz + Dead-Time 1.5 us<br/>GPIO 25, 26| OPT6N["Aislamiento de Alta Velocidad<br/>2x Optoacopladores 6N137 (50 ns)"]
-        OPT6N -->|HIN, LIN (5 VDC)| IR2110["Driver de Compuerta IR2110<br/>Red Bootstrap (+12 VDC / Diodo 1N4148)"]
-        BUS24["Fuente de Potencia Bus DC<br/>24 VDC / 6 A + Fusible 3 A"] --> MOSFET["Etapa Inversora MOSFET<br/>2x IRLZ44N (Configuración Medio Puente)"]
-        IR2110 -->|Disparo HO y LO| MOSFET
-        MOSFET -->|Onda Conmutada SPWM| FILTRO["Filtro Pasa-Bajos Reactivo LC<br/>Toroides L = 400 uH + C = 1 uF (400 V)"]
-        FILTRO -->|Onda Senoidal Limpia<br/>0.0 a 7.3 VAC| TRAFO["Transformador Elevador de Potencia<br/>Salida Variable 0.0 a 167.7 / 220 VAC"]
-    end
-```
-
-### 1.2 Matriz de Subsistemas e Interfaces de Hardware
-
-| Subsistema / Bloque | Componentes Principales | Interfaz de Entrada | Interfaz de Salida | Dominio Eléctrico |
-| :--- | :--- | :--- | :--- | :--- |
-| **Aislamiento de Mando Industrial** | 3x Optoacopladores `PC817` (`U1`–`U3`) + $R = 4.7\text{ k}\Omega$ | Contactos `Q1`–`Q3` del PLC Siemens LOGO! ($24\text{ VDC}$) | Entradas digitales `GPIO 32`, `33`, `18` (`INPUT_PULLUP`) | Barrera galvánica $24\text{ VDC} \rightarrow 3.3\text{ VDC}$ |
-| **Unidad de Procesamiento y Control** | **ESP32 (38 pines)** (`MCPWM` + `esp_timer` + `WebServer`) | Encoder `KY-040`, entradas PLC y clientes HTTP Wi-Fi | Trenes complementarios SPWM ($10\text{ kHz}$) y bus I2C | Aislado ($3.3\text{ VDC}$ / `GND_ESP`) |
-| **Aislamiento de Alta Velocidad** | 2x Optoacopladores lógicos `6N137` + $R_{\text{LED}} = 270\text{ }\Omega$ | Señales `SPWM_H` (`GPIO 25`) y `SPWM_L` (`GPIO 26`) | Nodos `HIN` y `LIN` ($5.0\text{ VDC}$ con *pull-up* de $1\text{ k}\Omega$) | Barrera galvánica $3.3\text{ VDC} \rightarrow 5.0\text{ VDC}$ |
-| **Etapa Driver y Elevación Bootstrap** | 1x Driver `IR2110` + Diodo `1N4148` + $C_{\text{boot}} = 10\text{ }\mu\text{F} \parallel 100\text{ nF}$ | Señales lógicas `HIN` (Pin 10) y `LIN` (Pin 12) | Pulsos de compuerta `HO` y `LO` ($12\text{ V}$ / $1.2\text{ A}$ pico) | Referenciado a `COM_POT` y nodo flotante `Vs` |
-| **Inversor y Filtro Armónico LC** | 2x MOSFETs `IRLZ44N` + $L = 400\text{ }\mu\text{H}$ + $C = 1\text{ }\mu\text{F}$ ($400\text{ V}$) | Bus continuo de $24\text{ VDC}$ y disparo `HO`/`LO` | Tensión alterna senoidal regulada por curva $V/f$ ($0\text{ a }60\text{ Hz}$) | Potencia (`COM_POT` $\rightarrow$ Salida AC) |
 ## 1. Arquitectura Modular del Sistema
 
 Para garantizar inmunidad al ruido electromagnético de conmutación ($10\text{ kHz}$) y aislar galvánicamente la lógica de control ($3.3\text{ VDC}$) de la etapa de potencia ($24\text{ VDC} \rightarrow 220\text{ VAC}$), el hardware se divide en dos tarjetas independientes sobre fibra de vidrio FR4:
@@ -116,7 +82,7 @@ Durante el desarrollo se registraron cuatro iteraciones de hardware, documentand
 | Iteración de Hardware | Configuración de Salida y Filtro | Voltaje AC Baja (Salida Inversor) | Voltaje AC Alta (Secundario Trafo) | Observación Técnica en Laboratorio |
 | :--- | :--- | :---: | :---: | :--- |
 | **Iteración 1: Protoboard** | Sin filtro LC, conexiones con jumpers | $\sim 1.0\text{ V} \rightarrow 0\text{ V}$ | $0.0\text{ VAC}$ | Bloqueo UVLO del Bootstrap por resistencia de contacto e inductancia parásita en protoboard. |
-| **Iteración 2: Placa FR4 Potencia (v1)** | Acople $1000\text{ }\mu\text{F}$ + Resistencia serie $100\text{ }\Omega$ ($5\text{ W}$) en toma $12\text{ V}$ | **$7.83\text{ VAC}$** *(Teórico: $7.80\text{ V}$, Error: $0.38\%$)* | **$59.87\text{ VAC}$** | La resistencia de $100\text{ }\Omega$ actuaba como divisor de tensión quedándose con $\sim 3.7\text{ V}$. Lectura de $9.3\text{ kHz}$ por rizado. |
+| **Iteración 2: Placa FR4 Potencia (v1)** | Acople $1000\text{ }\mu\text{F}$ + Resistencia serie $100\text{ }\Omega$ ($5\text{ W}$) en toma $12\text{ V}$ | **$7.83\text{ VAC}$** *(Teórico: 7.83 VAC (Teórico: 7.80 V, Error: 0.38%)* | **$59.87\text{ VAC}$** | La resistencia de $100\text{ }\Omega$ actuaba como divisor de tensión quedándose con $\sim 3.7\text{ V}$. Lectura de $9.3\text{ kHz}$ por rizado. |
 | **Iteración 3: Placa FR4 Potencia (v2)** | $2\times 100\text{ }\Omega$ en paralelo ($50\text{ }\Omega$) + Capacitor `CL21 0.047uF` en toma $9\text{ V}$ | $7.83\text{ VAC}$ | **$109.8\text{ VAC}$** | El capacitor `CL21` absorbió el rizado de la portadora en alta tensión estabilizando la lectura en **$60.0\text{ Hz}$**. |
 | **Iteración 4: Tarjeta 1 + Placa Potencia + Filtro LC** | **2 Toroides de $200\text{ }\mu\text{H}$ en serie ($400\text{ }\mu\text{H}$) + $1\text{ }\mu\text{F}$ ($400\text{ V}$)** | **$7.30\text{ VAC}$** (en devanado) | **$167.7\text{ VAC}$** | Eliminación de pérdidas resistivas por calor (+57.9 VAC adicionales), control PLC LOGO! y SCADA Wi-Fi activos. |
 
