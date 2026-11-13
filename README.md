@@ -10,44 +10,10 @@ El sistema integra aislamiento galvánico doble (óptico de alta velocidad para 
 
 Para garantizar inmunidad al ruido electromagnético de conmutación ($10\text{ kHz}$) y aislar galvánicamente la lógica de control ($3.3\text{ VDC}$) de la etapa de potencia ($24\text{ VDC} \rightarrow 220\text{ VAC}$), el hardware se divide en dos tarjetas independientes sobre fibra de vidrio FR4:
 
-    +-----------------------------------------------------------------------------------+
-    | TARJETA 1: UNIDAD DE CONTROL, HMI Y AISLAMIENTO PLC (Matriz 30x42 - 3.3V Aislados)|
-    |                                                                                   |
-    |  [PLC LOGO! 230RCEo] --(24VDC Q1..Q3)--> [3x PC817 (U1..U3)] ---> GPIO 32, 33, 18 |
-    |  [Encoder KY-040]    --(Cuadratura)-----------------------------> GPIO 4, 19, 15  |
-    |  [Celular / PC]      <--(Wi-Fi SoftAP: 192.168.4.1)-------------> [ESP32 DualCore]|
-    |  [Pantalla OLED]     <--(I2C 400 kHz)---------------------------- GPIO 21, 22     |
-    +-------------------------------------------------------------------------+---------+
-                                                                              |
-                                           Señales SPWM (10 kHz + Dead-Time 1.5 us)
-                                                                              |
-    +-------------------------------------------------------------------------v---------+
-    | TARJETA DE POTENCIA: AISLAMIENTO RÁPIDO, DRIVER BOOTSTRAP E INVERSOR (COM_POT)    |
-    |                                                                                   |
-    |  GPIO 25/26 ---> [2x Optoacopladores 6N137 (50ns)] ---> [Driver IR2110 + Bootstrap]|
-    |                                                                   |               |
-    |  [Bus 24 VDC] ---> [Puente MOSFET IRLZ44N (Q1, Q2)] <-------------+               |
-    |                            |                                                      |
-    |                            v                                                      |
-    |             [Filtro Reactivo LC: 400 uH + 1 uF 400V] ---> [Trafo Elevador 220VAC] |
-    +-----------------------------------------------------------------------------------+
 
----
 
 ## 2. Especificaciones Técnicas de Diseño
 
-| Parámetro del Sistema | Valor Implementado | Detalle |
-| :--- | :--- | :--- |
-| **Microcontrolador y Síntesis** | **ESP32 (38 pines)** — Periférico `MCPWM` | Síntesis Digital Directa (**DDS**) de 32 bits por interrupción en `IRAM` cada $100\text{ }\mu\text{s}$ (tabla LUT senoidal de 256 muestras). |
-| **Frecuencia Portadora ($f_c$)** | **$10.0\text{ kHz}$** ($T_c = 100\text{ }\mu\text{s}$) | Conmutación ultrasónica con **Tiempo Muerto (*Dead-Time*) por hardware de $1.5\text{ }\mu\text{s}$** en ambos flancos. |
-| **Rango de Frecuencia ($f_m$)** | **$0.0\text{ Hz}$ a $60.0\text{ Hz}$** (Resolución: $0.5\text{ Hz}$) | Corte automático de pulsos por debajo de $1.0\text{ Hz}$ para evitar inyección DC en el transformador. |
-| **Rampa Industrial** | **$15.0\text{ Hz/s}$** (Aceleración y Frenado) | Arranque y desaceleración progresiva en rampa antes de deshabilitar la etapa de potencia. |
-| **Aislamiento de Potencia** | **Optoacopladores rápidos `6N137`** | Retardo de propagación de $50\text{ ns}$ configurados en modo sumidero (*Sink*) no inversor. |
-| **Etapa Driver y Conmutación** | **`IR2110` + MOSFETs `IRLZ44N`** | Red *Bootstrap* con diodo rápido `1N4148` / `UF4007`, ciclo acotado ($4\%$ a $96\%$) y rutina de precarga de $5\text{ ms}$. |
-| **Filtro de Salida Primario** | **Filtro Reactivo LC ($L = 400\text{ }\mu\text{H}$, $C = 1\text{ }\mu\text{F}$)** | 2 inductores toroidales de $200\text{ }\mu\text{H}$ en serie + capacitor de polipropileno de $1\text{ }\mu\text{F}$ ($400\text{ V}$). |
-| **Integración con PLC** | **Siemens LOGO! 230RCEo** ($24\text{ VDC}$) | 3 entradas aisladas con `PC817`: Marcha/Paro (`Q1`) y 3 velocidades preseleccionadas (`20 Hz`, `40 Hz`, `60 Hz` vía `Q2` y `Q3`). |
-
----
 
 ## 3. Cálculos Principales
 
